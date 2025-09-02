@@ -171,6 +171,8 @@ class HonClimate : public HaierClimateBase {
 
   CleaningState cleaning_status_;
   bool got_valid_outdoor_temp_;
+  bool cleaning_active_lock_{false};
+  std::chrono::steady_clock::time_point cleaning_start_time_;
   esphome::optional<hon_protocol::VerticalSwingMode> pending_vertical_direction_{};
   esphome::optional<hon_protocol::HorizontalSwingMode> pending_horizontal_direction_{};
   esphome::optional<HardwareInfo> hvac_hardware_info_{};

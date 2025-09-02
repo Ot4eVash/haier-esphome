@@ -1333,20 +1333,19 @@ bool HonClimate::prepare_pending_action() {
       }
     case ActionRequest::START_STERI_CLEAN:
       if (this->control_method_ == HonControlMethod::SET_GROUP_PARAMETERS) {
-        uint8_t control_out_buffer[haier_protocol::MAX_FRAME_SIZE];
-        memcpy(control_out_buffer, this->last_status_message_.get(), this->real_control_packet_size_);
-        hon_protocol::HaierPacketControl *out_data = (hon_protocol::HaierPacketControl *) control_out_buffer;
-        out_data->self_cleaning_status = 0;
-        out_data->steri_clean = 1;
-        out_data->set_point = 0x06;
-        out_data->vertical_swing_mode = (uint8_t) hon_protocol::VerticalSwingMode::CENTER;
-        out_data->horizontal_swing_mode = (uint8_t) hon_protocol::HorizontalSwingMode::CENTER;
-        out_data->ac_power = 1;
-        out_data->ac_mode = (uint8_t) hon_protocol::ConditioningMode::DRY;
-        out_data->light_status = 0;
+        // Используем точную команду из сниффера
+        uint8_t control_out_buffer[] = {
+          0x09, 0x01,  // Субкоманда из сниффера
+          0x21, 0x00,  // Данные из сниффера
+          0x82,        // Steri-clean mode
+          0x01,        // 
+          0x00, 0x06,  // 
+          0x00, 0x00,  // 
+          0x32, 0x00   // 
+        };
         this->action_request_.value().message = haier_protocol::HaierMessage(
-            haier_protocol::FrameType::CONTROL, 0x0901,
-            control_out_buffer, this->real_control_packet_size_);
+            haier_protocol::FrameType::CONTROL, 0x6001,
+            control_out_buffer, sizeof(control_out_buffer));
         return true;
       } else {
         // No Steri clean support (yet?) in SET_SINGLE_PARAMETER

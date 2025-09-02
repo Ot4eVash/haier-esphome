@@ -1345,7 +1345,7 @@ bool HonClimate::prepare_pending_action() {
         out_data->ac_mode = (uint8_t) hon_protocol::ConditioningMode::DRY;
         out_data->light_status = 0;
         this->action_request_.value().message = haier_protocol::HaierMessage(
-            haier_protocol::FrameType::CONTROL, (uint16_t) hon_protocol::SubcommandsControl::SET_GROUP_PARAMETERS,
+            haier_protocol::FrameType::CONTROL, 0x0901,
             control_out_buffer, this->real_control_packet_size_);
         return true;
       } else {

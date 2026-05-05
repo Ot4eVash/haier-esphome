@@ -111,6 +111,9 @@ void HonClimate::start_steri_cleaning() {
     ESP_LOGI(TAG, "Sending steri cleaning start request");
     this->action_request_ =
         PendingAction({ActionRequest::START_STERI_CLEAN, esphome::optional<haier_protocol::HaierMessage>()});
+    this->cleaning_active_lock_ = true;
+    this->cleaning_start_time_ = std::chrono::steady_clock::now();
+    ESP_LOGI(TAG, "Cleaning lock activated for steri-cleaning");
   }
 }
 
@@ -530,6 +533,21 @@ haier_protocol::HaierMessage HonClimate::get_control_message() {
   memcpy(control_out_buffer, this->last_status_message_.get(), this->real_control_packet_size_);
   hon_protocol::HaierPacketControl *out_data = (hon_protocol::HaierPacketControl *) control_out_buffer;
   control_out_buffer[4] = 0;  // This byte should be cleared before setting values
+  // === Cleaning lock patch (Ot4eVash) ===
+  // While cleaning is active, force steri_clean bit to stay set
+  // to prevent AC from interpreting incoming control packets as "stop cleaning".
+  if (this->cleaning_active_lock_) {
+    hon_protocol::HaierPacketControl *last_status =
+        (hon_protocol::HaierPacketControl *) this->last_status_message_.get();
+    if (last_status->steri_clean == 1) {
+      ESP_LOGD(TAG, "Preserving steri_clean bit during lock");
+      out_data->steri_clean = 1;
+      return haier_protocol::HaierMessage(haier_protocol::FrameType::CONTROL,
+                                          (uint16_t) hon_protocol::SubcommandsControl::SET_GROUP_PARAMETERS,
+                                          control_out_buffer, this->real_control_packet_size_);
+    }
+  }
+  // === End cleaning lock patch ===
   bool has_hvac_settings = false;
   if (this->current_hvac_settings_.valid) {
     has_hvac_settings = true;
@@ -972,11 +990,32 @@ haier_protocol::HandlerError HonClimate::process_status_message_(const uint8_t *
     }
     if (new_cleaning != this->cleaning_status_) {
       ESP_LOGD(TAG, "Cleaning status change: %d => %d", (uint8_t) this->cleaning_status_, (uint8_t) new_cleaning);
-      if (new_cleaning == CleaningState::NO_CLEANING) {
-        // Turning AC off after cleaning
-        this->action_request_ =
-            PendingAction({ActionRequest::TURN_POWER_OFF, esphome::optional<haier_protocol::HaierMessage>()});
+      // === Cleaning lock patch (Ot4eVash) ===
+      if (new_cleaning == CleaningState::STERI_CLEAN || new_cleaning == CleaningState::SELF_CLEAN) {
+        this->cleaning_active_lock_ = true;
+        this->cleaning_start_time_ = std::chrono::steady_clock::now();
+        ESP_LOGI(TAG, "Cleaning detected, lock activated");
+      } else if (new_cleaning == CleaningState::NO_CLEANING) {
+        if (this->cleaning_active_lock_) {
+          auto now = std::chrono::steady_clock::now();
+          auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - this->cleaning_start_time_).count();
+          if (elapsed < 30) {
+            ESP_LOGW(TAG, "Ignoring cleaning stop, only %ld seconds passed", elapsed);
+            new_cleaning = this->cleaning_status_;  // keep current cleaning status
+          } else {
+            this->cleaning_active_lock_ = false;
+            ESP_LOGI(TAG, "Cleaning finished, lock deactivated");
+            // Turning AC off after cleaning
+            this->action_request_ =
+                PendingAction({ActionRequest::TURN_POWER_OFF, esphome::optional<haier_protocol::HaierMessage>()});
+          }
+        } else {
+          // Turning AC off after cleaning
+          this->action_request_ =
+              PendingAction({ActionRequest::TURN_POWER_OFF, esphome::optional<haier_protocol::HaierMessage>()});
+        }
       }
+      // === End cleaning lock patch ===
       this->cleaning_status_ = new_cleaning;
 #ifdef USE_TEXT_SENSOR
       this->update_sub_text_sensor_(SubTextSensorType::CLEANING_STATUS, this->get_cleaning_status_text());
